@@ -3,14 +3,14 @@
 % The inputs are RAOs calculated from OpenFAST with a wave only white noise simulation
 % and a wind only simulation (U= 50m/s, TI = 11%) with the turbine parked.
 % The mean surge offset in the sea state is also needed, a step wind
-% simulation can be used to estimate this. 
+% simulation could be used to estimate this or a frequency domain model such as RAFT. 
 
 % The MLER is a single event, the constrained MLERs (CMLERs) can be used to
 % predict the characteristic value by taking the mean of a sample of at
 % least 6 cases. 
 
 % This script is a bit different (and improved) from the one used to produce the cases from
-% the report '' as it uses an analytical approach to get the combined
+% the report 'Impact accelerator award - Short design events' as it uses an analytical approach to get the combined
 % distribution. This requires the use of the Gausian distribution of the process rather than the rayleigh distributed peaks but the results are very similar.
 
 % Contact: tom.tosdevin@postgrad.plymouth.ac.uk 
@@ -21,7 +21,7 @@
 % 2. Load and reprocess wave RAOs, create response spectrum, estimate target response EVD due to waves
 % 3. Load and reprocess wind RAOs, create response spectrum, estimate target response EVD due to wind
 % 4. Estimate the relative importance of the waves relative to wind and calculate a weighting
-% 5. Estimate the target response extreme value distribution of the combined response from waves and wind  
+% 5. Estimate the target combined response extreme value distribution from waves and wind  
 % 6. Produce the wave cases
 % 7. Produce the wind cases
 % 8. Save data
@@ -31,56 +31,57 @@
 clear
 close all
 clc
-% close all
+tic;
+
 numsimMC = 0; % number of montecarlo simulations to check the target EVDs
-Points = round(numsimMC*0.1):round(numsimMC-numsimMC*0.1); % number of points to average to place combined dist
-MCTS = 0.2 % Time step used in the MC simulations (unused if numsimMC = 0)
-EX = 1 % EX = 1 is extreme sea state, 3 is U = 29
-Responsetype = 1 % 1 = Tower base bending moment, 2 = FT1 (mooring load), 3 = Nacelle aceleration in x, 4 = Pitch
-Device = 1 % 1 = Windcrete
-saveq = 2 % 1 = save, 2 = dont save
-RIC = 100 % value below which cases are split, if always want to split, use 100.
-CRRWnum = 50; % number of CRRWs to generate for average used in place of MLER for wind. 
-CRRWnumSave = 10; % number of CRRWs to save
-ddt = 0.025 % time step used in output time sereis, should be the same as will be used in OpenFAST.
-hourexposureLFMLER = 1/6; % Exposure time of wind, 10 minute repeating used in report
-hourexposureWF = 1; % Exposure time of waves
+MCTS = 0.2; % Time step used in the MC simulations (unused if numsimMC = 0)
+EX = 1; % EX = 1 is extreme sea state (U = 50 m/s), 3 is U = 29 m/s
+Responsetype = 1; % 1 = Tower base bending moment, 2 = FT1 (mooring load), 3 = Nacelle aceleration in x, 4 = Pitch
+Device = 1; % 1 = Windcrete
+saveq = 1; % 1 = save, 2 = dont save
+plots = 2; % 1 = plot, 2 = dont plot
+RIC = 100; % value below which cases are split, if always want to split, use 100.
+CRRWnum = 50; % number of CMLERs to generate for average used in place of MLER for wind. 
+CRRWnumSave = 10; % number of CMLERs to save
+ddt = 0.025; % time step used in output time sereis, should be the same as will be used in OpenFAST.
+hourexposureLFMLER = 1/6; % Exposure time of wind in hours, 10 minute repeating used in report
+hourexposureWF = 1; % Exposure time of waves (hrs)
 ttMLER = -400:ddt:100; % time series time steps with the extreme response occuring at t = 0s.
-scalefactor = 1; % scale of the model 1:1
+scalefactor = 1; % scale of the model, 1 if full scale
  d = 200; % water depth
 
 % create name
 if EX == 1
-    pref1 = 'EX_U50'
+    pref1 = 'EX_U50';
 end
 if EX == 3 
-    pref1 = 'mod_U29'
+    pref1 = 'mod_U29';
 end
 if Device == 1
-    pref2 = 'WC'
-    pref4 = '_08' % target response amplitude percentile
+    pref2 = 'WC';
+    pref4 = '_08'; % target response amplitude percentile
 end
 
 if Responsetype == 1
-    pref3 = 'TwrMy'
+    pref3 = 'TwrMy';
 end
 if Responsetype == 2
-    pref3 = 'FT1'
+    pref3 = 'FT1';
 end
 if Responsetype == 3
-    pref3 = 'Nxa'
+    pref3 = 'Nxa';
 end
 if Responsetype == 4
-    pref3 = 'P'
+    pref3 = 'P';
 end
 
-fnamMLERWind = strcat('MLER_',pref1,'_wind_',pref2,'New_',pref3,pref4) % wind
-fnamMLER = strcat('MLER_',pref1,'_wave_',pref2,'New_',pref3,pref4) % 
-fnamCMLERWind = strcat('CMLER_',pref1,'_wind_',pref2,'New_',pref3,pref4) % wind
-fnamCMLER = strcat('CMLER_',pref1,'_wave_',pref2,'New_',pref3,pref4) % 
+fnamMLERWind = strcat('MLER_',pref1,'_wind_',pref2,'New_',pref3,pref4); % wind
+fnamMLER = strcat('MLER_',pref1,'_wave_',pref2,'New_',pref3,pref4); % 
+fnamCMLERWind = strcat('CMLER_',pref1,'_wind_',pref2,'New_',pref3,pref4); % wind
+fnamCMLER = strcat('CMLER_',pref1,'_wave_',pref2,'New_',pref3,pref4); % 
 
-fnamCMLERWindmean = strcat('Mean_CMLER_',pref1,'_wind_',pref2,'_',pref3,pref4) % wind
-fnamEVD = strcat('EVD_',pref1,'_wave_',pref2,'_',pref3,pref4) % 
+fnamCMLERWindmean = strcat('Mean_CMLER_',pref1,'_wind_',pref2,'_',pref3,pref4); % wind
+fnamEVD = strcat('EVD_',pref1,'_wave_',pref2,'_',pref3,pref4); % 
 
 if Device == 1 
 percentile = 0.8; % target percentile, recomend 0.8 for spars and TLPs, 0.99 for semi-subs and barges
@@ -88,13 +89,13 @@ end
 percentileComp099 = 0.99;
 percentileComp05 = 0.5;
 
-% surge offset due to constant wind, need to write generic interpolated
+% mean surge offset due to constant wind, need to write generic interpolated
 % script for this based on step wind run. 
 if Device == 1
         if EX == 1
-XX = -5; % U = 50m/s % this needs predicting from a step wind simulation
+XX = 5; % U = 50m/s % this needs predicting from a step wind simulation
         else
-XX = -1.7 % U = 29m/s % this needs predicting from a step wind simulation
+XX = 1.7; % U = 29m/s % this needs predicting from a step wind simulation
         end
 end
 
@@ -133,14 +134,17 @@ RT1 = hourexposureWF*60*60; % repeat time
 % define angular frequencies
 fHz = [ceil(val1*RT1):1:floor(val2*RT1)]/RT1; % frequencies to cover
 f = fHz*(2*pi); %convert to angular frequency
-fWF = f;
+wvec = f;
+Period = (2*pi)./wvec;
+
 fc = linspace(f(2)-f(1),f(2)-f(1),length(f)); % delta f
 
 [Sf] = waveSpectrum(fHz, param, specType);
 SWave = Sf/(2*pi);
-fname = []
+fname = [];
 
-% set these with reasonable values of I to avoid large file size plots etc. 
+% set these with reasonable values of I to avoid large file size plots etc.
+% I should cover a range coving the extreme response
 if Responsetype == 4
 RAO = RAOP;
 RAOpha = PhasePitch;
@@ -159,11 +163,9 @@ end
 if Responsetype == 3
 RAO = RAONx;                  
 RAOpha = PhaseNx;
- I = 0:0.01:20; % response values 
+ I = 0:0.01:20; % response values (m/s^2)
 end
 
-wvec = f; % set angular frequencies
-Period = (2*pi)./wvec;
 SHz = SWave*(2*pi);
 
 %% Resample so that spectrum and RAO frequencies match up
@@ -193,7 +195,7 @@ fWave = wvec;
 % hold on
 % yyaxis right
 % plot(Period,(SrWave))
-%% 2. Calculate spectral moments and amplitudes
+%% Calculate spectral moments and amplitudes
 
 
 % S in frequency components (for M0)
@@ -237,16 +239,22 @@ m = round(1/(normcdf(0,muWF,sig)));
 %     eeee(i) = I(i)/MM0Wave;
 % FFmax(i) = n*((I(i)/((MM0Wave^2)))*exp(-(I(i)^2)/(2*(MM0Wave^2)))*(1-exp(-(I(i)^2)/(2*(MM0Wave^2))))^(n-1));
 % end
+
 % Gausian process
-for i = 1:length(I)
-    eeee(i) = I(i)/MM0Wave;
-FFmax(i) = m*((1/((MM0Wave*sqrt(2*pi))))*exp(-(I(i)^2)/(2*(MM0Wave^2))))*(normcdf(eeee(i),0))^(m-1);
-end
-tarWF = cumtrapz(eeee*MM0Wave,FFmax); % get CDF
+% for i = 1:length(I)
+%     eeee(i) = I(i)/MM0Wave;
+% FFmax(i) = m*((1/((MM0Wave*sqrt(2*pi))))*exp(-(I(i)^2)/(2*(MM0Wave^2))))*(normcdf(eeee(i),0))^(m-1);
+% end
+        eeee = I/MM0Wave;
+        FFmax = m*((1/((MM0Wave*sqrt(2*pi)))).*exp(-(I.^2)/(2*(MM0Wave^2)))).*(normcdf(eeee,0)).^(m-1);
+
+tarWF = cumtrapz(eeee*MM0Wave,FFmax); % get CDF from PDF (extremes)
+if plots == 1
 plot(eeee*MM0Wave,tarWF,'b-.') 
 hold on
+end
 
-tarpksWF = nthroot(tarWF,n); % CDF of peaks rather than extremes
+tarpksWF = nthroot(tarWF,n); % CDF of peaks rather than extremes by taking nth root
 WFXaxis = eeee*MM0Wave;
 
 [minValue,closestIndex] = min(abs(tarWF-percentileComp099'));
@@ -270,7 +278,7 @@ sig = TI*U;
 RT1 = 10*60; % repeat time = 10 mins
 RT = 10*60; % repeat time 
 
-val1 = 1/RT1; % this from booklet,when RT = 600. fmin 
+val1 = 1/RT1; %  fmin 
 val2 = 0.3; % fmax
 
 % define angular frequencies
@@ -284,7 +292,7 @@ Sf = ((sig^2)*(4*340.2./U))./((1+((6*fHz*340.2)./U)).^(5/3));
 S = Sf/(2*pi);
 SWind = S';
 
-fname = []
+fname = [];
 
 if Responsetype == 4
 RAO = RAOP;
@@ -331,7 +339,7 @@ fWind = f;
 % figure
 % plot(fRAO,RAO)
 % hold on
-% plot(Period,(RAOsampled))
+% plot(Period,(RAOsampledWind))
  
 % figure
 % plot(Period,SrWave)
@@ -371,16 +379,16 @@ MM0Wind = sqrt(M0Wind);
 ET = (((hourexposureLFMLER*60)*60)/(sqrt(scalefactor))); % Exposure time
 ee = sqrt(1-(((M2Wind)^2)/(M0Wind*M4Wind))); % bandwidth parameter
 n = (1/(4*pi))*((1+sqrt(1-(ee^2)))/sqrt(1-(ee^2)))*sqrt(M2Wind/M0Wind)*(ET); % (2.12) expected number of peaks in exposure time
-TEV = sqrt(2*log((2*n*sqrt(1-(ee^2)))/(1+sqrt(1-(ee^2)))));
+TEV = sqrt(2*log((2*n*sqrt(1-(ee^2)))/(1+sqrt(1-(ee^2))))); % Target extreme value, a value of say 4 means a value at 4 times the standard deviation of the process 
 
 nLF_old = n;
 
 % Predict wind response EVD
-FFmax =[]
-eeee = []
-sig = 1
-muLF = TEV*sig
-m = round(1/(normcdf(0,muLF,sig))) % samples of process
+FFmax =[];
+eeee = [];
+sig = 1;
+muLF = TEV*sig;
+m = round(1/(normcdf(0,muLF,sig))); % number of samples of gaussian process for exposure time
 
 % rayleigh peaks 
 % for i = 1:length(I)
@@ -388,13 +396,18 @@ m = round(1/(normcdf(0,muLF,sig))) % samples of process
 % FFmax(i) = n*((I(i)/((MM0Wind^2)))*exp(-(I(i)^2)/(2*(MM0Wind^2)))*(1-exp(-(I(i)^2)/(2*(MM0Wind^2))))^(n-1));
 % end
 % Gaussian process
-for i = 1:length(I)
-    eeee(i) = I(i)/MM0Wind;
-FFmax(i) = m*((1/((MM0Wind*sqrt(2*pi))))*exp(-(I(i)^2)/(2*(MM0Wind^2))))*(normcdf(eeee(i),0))^(m-1);
-end
-tarLF = cumtrapz(eeee*MM0Wind,FFmax); % get CDF
-plot(eeee*MM0Wind,tarLF,'r-.')
+% for i = 1:length(I)
+%     eeee(i) = I(i)/MM0Wind;
+% FFmax(i) = m*((1/((MM0Wind*sqrt(2*pi))))*exp(-(I(i)^2)/(2*(MM0Wind^2))))*(normcdf(eeee(i),0))^(m-1);
+% end
+        eeee = I/MM0Wind;
+        FFmax = m*((1/((MM0Wind*sqrt(2*pi)))).*exp(-(I.^2)/(2*(MM0Wind^2)))).*(normcdf(eeee,0)).^(m-1);
 
+tarLF = cumtrapz(eeee*MM0Wind,FFmax); % get CDF of extreme value distribution
+if plots == 1
+plot(eeee*MM0Wind,tarLF,'r-.')
+grid on
+end
 tarpksLF = nthroot(tarLF,n); % find CDF of peaks rather than extremes
 LFXaxis = eeee*MM0Wind;
 
@@ -406,8 +419,8 @@ MLF05 = eeee(closestIndex)*MM0Wind; % Target amplitude of response
 MLF = eeee(closestIndex)*MM0Wind; % Target amplitude of response
 
 %% 4. Estimate the relative importance of the waves relative to wind and calculate a weighting
-Relimp099 = (MWF099)/(MLF099); % relative importance = ratio of wind to wave response
-Relimp05 = (MWF05)/(MLF05);
+Relimp099 = (MWF099)/(MLF099); % relative importance = ratio of wind to wave response calculated from 99th percentiles
+Relimp05 = (MWF05)/(MLF05); % relative importance = ratio of wind to wave response calculated from 50th percentiles
 
 Absimp = MWF099 + MLF099; 
 % make minus if wind dominates, positive if wave dominate, makes for a
@@ -419,7 +432,7 @@ if Relimp05 <1
 Relimp05 = (1./Relimp05)*-1;
 end
 Relimp099T = Relimp099;
-% If wave dominates use 50th percentile
+% If wave dominates use 50th percentile for rel imp
 if Relimp099 >0 && Relimp099 <RIC
     Relimp099 = Relimp05;
 end
@@ -436,20 +449,21 @@ end
 
 % estimate of combined spectrum shape (location wrong) 
  CDF = ((weighting*tarpksWF)+((1-weighting)*tarpksLF)); % pks
-grid on
 
 % New way to get combined dist,
 % calc number of samples (m) for exposure time
-% This bit could be improved... 
 FFmax =[];
 eeee = [];
 sig = 1;
+% The value of m needs to reflect the importance of wind relative to wave. 
+% The wind is lower frequency and so there will be an over prediction of the response if the number of samples is calculated using the number of wave peaks or weighting them too heavily  
+% This bit could be improved...
 if Relimp099<-1 % if wind dominates 
- m = round(1/(normcdf(0,(muWF*weighting)+(muLF*(1-weighting)),sig)))
+ m = round(1/(normcdf(0,(muWF*weighting)+(muLF*(1-weighting)),sig)));
 else
- m11 = round(1/(normcdf(0,muLF,sig)))
-m22 = round(1/(normcdf(0,muWF,sig)))
-m = m11+m22  % if wave dominates
+ m11 = round(1/(normcdf(0,muLF,sig)));
+m22 = round(1/(normcdf(0,muWF,sig)));
+m = m11+m22;  % if wave dominates
 end
 
 % estimate std of combined process
@@ -460,48 +474,60 @@ process2 = (muLF) + MM0Wind * randn(n, 1); % Wind
 % Calculate the sum of the processes
 sum_process = process1 + process2;
 % calculate std of process
- MM0 = (std(sum_process))
+ MM0 = (std(sum_process));
  if Responsetype > 2
-MM0 = round(std(sum_process),2) % observed to lead to a stable result from n = 50000000 simulations for this response
+MM0 = round(std(sum_process),2); % observed to lead to a stable result from n = 50000000 simulations for this response
  else
-  MM0 = round(std(sum_process),4,"significant") % observed to lead to a stable result from n = 50000000 simulations for this response
+  MM0 = round(std(sum_process),4,"significant"); % observed to lead to a stable result from n = 50000000 simulations for this response
  end   
+ % Is there an analytical way to calculate MM0? (std of combined process)
+
  % combined EVD
-for i = 1:length(I)
-    eeee(i) = I(i)/MM0;
-FFmax(i) = m*((1/((MM0*sqrt(2*pi))))*exp(-(I(i)^2)/(2*(MM0^2))))*(normcdf(eeee(i),0))^(m-1);
-end
+% for i = 1:length(I)
+%     eeee(i) = I(i)/MM0;
+% FFmax(i) = m*((1/((MM0*sqrt(2*pi))))*exp(-(I(i)^2)/(2*(MM0^2))))*(normcdf(eeee(i),0))^(m-1);
+% end
+        eeee = I/MM0;
+        FFmax = m*((1/((MM0*sqrt(2*pi)))).*exp(-(I.^2)/(2*(MM0^2)))).*(normcdf(eeee,0)).^(m-1);
+
 tarGcomb = cumtrapz(eeee*MM0,FFmax); %check CDF goes to 1
 if Relimp099 > 0
+    if plots ==1
+        grid on
 plot(eeee*MM0,tarGcomb,'y-.') 
+    end
 end
+
 % Shift EVD by 99th percentile of CDF as this is observed to have a better
-% shape closer to simulations. I don;t like this... This could also be improved (removing this step) by finding a
+% shape closer to simulations. I don't like this... This could also be improved (removing this step) by finding a
 % better analytical way to get the combined EVD. Doesn't have any impact on
 % the 99th percentile target but does improve 80th percentile target
 % slightly. Method would still work if this step were removed.
 if Relimp099 < 0
 % find 99th percentile to shift dist....
 [minValue,closestIndex] = min(abs(tarGcomb-0.99'));
-valT = eeee(closestIndex)*MM0
+valT = eeee(closestIndex)*MM0;
 [minValue,closestIndex] = min(abs((CDF.^(nWF_old+nLF_old))-0.99'));
 valT2 = LFXaxis(closestIndex)
-Shift = valT-valT2
+Shift = valT-valT2;
+if plots ==1
  plot(LFXaxis+Shift,CDF.^(nWF_old+nLF_old),'y-.')
 end
-
+end
+if plots ==1
  plot(LFXaxis,CDF.^(nWF_old+nLF_old),'--k')
-
+end
  %% calculate the combined response target amplitude Total
 [val,ind] = ((min(abs((tarGcomb-percentile)))));
 if Relimp099 < 0
     [val,ind] = ((min(abs(((CDF.^(nWF_old+nLF_old))-percentile)))));
-Total = LFXaxis(ind)+Shift
+Total = LFXaxis(ind)+Shift;
 else
-    Total = LFXaxis(ind)
+    Total = LFXaxis(ind);
 end
+if plots == 1
 xlim([Total*0.6 Total*1.2])
-
+end
 
 %split the target combined response into wind and wave contributions
 %according to the relatie importance.
@@ -514,6 +540,7 @@ Wavetar = (1-(1/(1+abs(Relimp099)))*abs(Relimp099))*Total;
 end
 % end
 
+if plots ==1
 hold on
 if Responsetype == 1
 xlabel('TwrMy (Nm)')
@@ -533,6 +560,7 @@ xlim([1 8])
 end
 
 ylabel('CDF')
+end
 
 % Create MLER for Wind
  if abs(Relimp099)<RIC % split target percentiles between wave and wind.
@@ -545,31 +573,35 @@ M = Windtar;
 
      % calculate wind profile
 fr = M1Wind/M0Wind;
-fn = fWind;
+fn = fWind; % frequency components
 
-% Spectral amplitude of sea Spectrum
-for i = 1:length(SWind)
-aa(i) = sqrt((SWind(i)*fc(i)));   % according to NREL  application of MLER paper
-end
-phi = sqrt(SrWind./SWind);
+% Spectral amplitude of wind Spectrum
+% for i = 1:length(SWind)
+% aa(i) = sqrt((SWind(i)*fc(i)));   % according to NREL  application of MLER paper
+% end
+aa = sqrt((SWind'.*fc));   % according to NREL  application of MLER paper
+
+phi = sqrt(SrWind'./SWind);
 phi(isnan(phi))=0;
 
-for i = 1:length(SrWind)
-A(i) = ((phi(i)*aa(i))/((M0Wind*M2Wind)-(M1Wind^2)))*((M2Wind-(M1Wind*fn(i)))+(fr*((M0Wind*fn(i))-M1Wind)));
-end
+% for i = 1:length(SrWind)
+% A(i) = ((phi(i)*aa(i))/((M0Wind*M2Wind)-(M1Wind^2)))*((M2Wind-(M1Wind*fn(i)))+(fr*((M0Wind*fn(i))-M1Wind)));
+% end
+A = ((phi'.*aa)./((M0Wind*M2Wind)-(M1Wind^2))).*((M2Wind-(M1Wind.*fn))+(fr.*((M0Wind.*fn)-M1Wind)));
 
 % wind profile
 phe = phaseofinterestWind; 
 
-ZZZ = []
-jj = abs(min(ttMLER))*2; % MLER peaks at half this value
- for j = ddt:ddt:jj
-for i = 1:length(SrWind)
-Z(i) = sum(aa(i)*M*A(i)*(cos((fn(i)*(j-(jj/2)))+(phe(i))))); 
-end
+
+ jj = abs(min(ttMLER))*2; % MLER peaks at half this value
+ZZZ = zeros(1, length(ddt:ddt:jj));
+jjj =  ddt:ddt:jj;
+ for j = 1:length(jjj)
+Z = (aa.*M.*A.*(cos((fn.*(jjj(j)-(jj/2)))+(phe')))); 
 Z = Z(~isnan(Z));
- ZZZ = cat(1,ZZZ,sum(Z));
+ ZZZ(j) = sum(Z);
  end
+
  j = ddt:ddt:jj;
 [v ind] = min(abs(j-(abs(min(ttMLER))+max(ttMLER)))); %j - total length of run
 % plot((j(1:ind)-jj./2),ZZZ(1:ind))
@@ -585,9 +617,10 @@ ZZZ = ZZZ(1:ind);
 %%
 % % save in matlab format
 P = [];
-P = cat(1,(j-j(1)),(ZZZ'+U));
+P = cat(1,(j-j(1)),(ZZZ+U));
 P = P';
 
+% uniform wind input file used in openfast
 a = zeros(1,length(ZZZ));
 Shear = linspace(0, 0,length(a)); % set the shear wanted for OpenFAST
 % Shear = linspace(0.11, 0.11,length(a)); % power law exponent
@@ -608,108 +641,61 @@ end
   % save as matlab
    save(fname,'P','Relimp099','Relimp099T', 'Relimp05','Absimp','Wavetar','Windtar','Total','XX') 
  % OpenFAST format
-dlmwrite(fname2,W,'delimiter',' ','precision',7); % time series
+% dlmwrite(fname2,W,'delimiter',' ','precision',7); % time series
+fid1 = fopen(fname2, 'w');
+            fprintf(fid1, '%g\t%10.8f\t%g\t%10.8f\t%g\t%10.8f\t%g\t%10.8f\n', W');
+            fclose(fid1);
   else
   end
 PMLERWind = P;
-%% %%%%%%%%%%%%%%%%%%%%%%% Create CRRWs for Wind
+%% %%%%%%%%%%%%%%%%%%%%%%% Create CMLERs (CRRWs) for Wind
 
 phe = phaseofinterestWind;
 phi = RAOsampledWind;
 
-SAA = []
-for ii = 1:length(M)
 %surface elevation
-for i = 1:length(SWind)
-aaa(i) = sqrt((SWind(i)*fc(i)));   
-end
+aaa = sqrt((SWind'.*fc));   
+
 %response
-for i = 1:length(SrWind)
-aa(i) = sqrt((SrWind(i)*fc(i)));  
-end
+aa = sqrt((SrWind.*fc));  
 
 % var = (aa.^2); 
 sig = 1;  % Dietz pg 49 (pg 46 for single MLER)
 mu = 0;
-for j = 1:CRRWnum
-for i = 1:length(aa)
-Vn(i,j) = (normrnd(mu,sig));
-Wn(i,j) = (normrnd(mu,sig));
-end
-end
+        Vn = normrnd(mu, sig, length(aa), CRRWnum);
+        Wn = normrnd(mu, sig, length(aa), CRRWnum);
+
 % 
-S1 = []
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-SE(i) = aa(i)*((Vn(i,j)*cos(phe(i)))+(Wn(i,j)*sin(phe(i))));
-end
-S1(j) = sum(SE,2);
-SE =[];
-end
-
-S2 = []
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-SE(i) = aa(i)*f(i)*((Vn(i,j)*sin(phe(i)))-(Wn(i,j)*cos(phe(i))));
-end
-S2(j) = sum(SE,2);
-SE =[];
-end
-
-S3 = []
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-SE(i) = aa(i)*((-Vn(i,j)*sin(phe(i)))+(Wn(i,j)*cos(phe(i))));
-end
-S3(j) = sum(SE,2);
-SE =[];
-end
-
-S4 = []
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-SE(i) = aa(i)*f(i)*((Vn(i,j)*cos(phe(i)))+(Wn(i,j)*sin(phe(i))));
-end
-S4(j) = sum(SE,2);
-SE =[];
-end
+S1 = sum( aa'.*((Vn.*cos(phe))+(Wn.*sin(phe))), 1 );
+S2 = sum(aa'.*fn'.*((Vn.*sin(phe))-(Wn.*cos(phe))));
+S3 = sum(aa'.*((-Vn.*sin(phe))+(Wn.*cos(phe))));
+S4 = sum(aa'.*fn'.*((Vn.*cos(phe))+(Wn.*sin(phe))),1);
 
 %% Condition V and W
 fm = M1Wind/M0Wind;
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-V(i,j) = Vn(i,j)-((aa(i)/((M2Wind*M0Wind)-M1Wind^2))*(((M2Wind-(f(i)*M1Wind))*S1(j)*cos(phe(i)))-(M(ii)*(M2Wind-(f(i)*M1Wind))*cos(phe(i)))+(((f(i)*M0Wind)-M1Wind)*S2(j)*sin(phe(i)))+(((f(i)*M1Wind)-M2Wind)*S3(j)*sin(phe(i)))+(((f(i)*M0Wind)-M1Wind)*S4(j)*cos(phe(i)))-(((M(ii)*fm*((f(i)*M0Wind)-M1Wind)*cos(phe(i)))))));
-W(i,j) = Wn(i,j)-((aa(i)/((M2Wind*M0Wind)-M1Wind^2))*(((M2Wind-(f(i)*M1Wind))*S1(j)*sin(phe(i)))-(M(ii)*(M2Wind-(f(i)*M1Wind))*sin(phe(i)))-(((f(i)*M0Wind)-M1Wind)*S2(j)*cos(phe(i)))-(((f(i)*M1Wind)-M2Wind)*S3(j)*cos(phe(i)))+(((f(i)*M0Wind)-M1Wind)*S4(j)*sin(phe(i)))-(((M(ii)*fm*((f(i)*M0Wind)-M1Wind)*sin(phe(i)))))));
-end 
-end
+             V = Vn - ((aa'/((M2Wave*M0Wave)-M1Wave^2)).*(((M2Wave-(fn'*M1Wave)).*S1.*cos(phe))-(M * (M2Wave-(fn'*M1Wave)).*cos(phe))+(((fn'*M0Wave)-M1Wave).*S2.*sin(phe))+(((fn'*M1Wave)-M2Wave).*S3.*sin(phe))+(((fn'*M0Wave)-M1Wave).*S4.*cos(phe))-(((M * fm*((fn'*M0Wave)-M1Wave).*cos(phe))))));
+        W = Wn - ((aa'/((M2Wave*M0Wave)-M1Wave^2)).*(((M2Wave-(fn'*M1Wave)).*S1.*sin(phe))-(M * (M2Wave-(fn'*M1Wave)).*sin(phe))-(((fn'*M0Wave)-M1Wave).*S2.*cos(phe))-(((fn'*M1Wave)-M2Wave).*S3.*cos(phe))+(((fn'*M0Wave)-M1Wave).*S4.*sin(phe))-(((M * fm*((fn'*M0Wave)-M1Wave).*sin(phe))))));
 
-SE =[];
-SEE = [];
-for j = 1:CRRWnum
-for t = 1:length(ttMLER)
-for i = 1:length(aa)
-SE(i) = aaa(i)*((V(i,j)*cos((-f(i)*ttMLER(t))))+(W(i,j)*sin((-f(i)*ttMLER(t)))));
-end
-SEE(t) = sum(SE,2);
-SE =[];
-end
-SEA(j,:) = SEE;
-end
-% plot(tt,SEA(3,:));
-SAA = cat(1,SAA,SEA);
-SEA = []
-end
+
+SE = [];
+SEA = zeros(CRRWnum, length(ttMLER));  
+        for t = 1:length(ttMLER)
+            SE = aaa'.*((V.*cos((-fn'.*ttMLER(t))))+(W.*sin((-fn'.*ttMLER(t)))));
+            SEA(:,t) = sum(SE,1);
+        end
 
 ttMLER2 = 0:ddt:(ttMLER(end)-(ttMLER(1)));  
-repmat(ttMLER2,size(SAA,1),1);
-SSE = cat(3,ans,SAA);
+repmat(ttMLER2,size(SEA,1),1);
+SSE = cat(3,ans,SEA);
 
+if plots ==1
 figure
 for i = 1:CRRWnum
     hold on
 plot(SSE(i,:,1),(SSE(i,:,2)+U))
 end
 plot(SSE(1,:,1),mean(SSE(:,:,2))+U,'k','linewidth',1.5)
+end
 CRRWMean2 = cat(1,squeeze(SSE(1,:,1)),mean(SSE(1:CRRWnum,:,2),1)+U);
 CRRWMean2=CRRWMean2';
 
@@ -719,6 +705,7 @@ Shear = linspace(0, 0,length(a));
 CRRWW = cat(1,CRRWMean2(:,1),CRRWMean2(:,2),a',a',a',Shear',a',a');
 % CRRWW = CRRWW';
 
+if plots == 1
 grid on 
 xlabel('Time (s)')
 ylabel('Wind speed (m/s)')
@@ -726,12 +713,11 @@ ylabel('Wind speed (m/s)')
 plot(CRRWMean2(:,1),CRRWMean2(:,2),'r','linewidth',1.5)
 
 xlim([250 500])
-
+end
 %% Save CRRW for paddle software and matlab
 
-
 for i = 1:CRRWnumSave
-fname = []
+fname = [];
 P = cat(1,squeeze(SSE(i,:,1))/sqrt(scalefactor),(squeeze(SSE(i,:,2))+U)/scalefactor);
 P = P';
 a = zeros(1,size(P,1));
@@ -763,16 +749,21 @@ save(fname3,'CRRWMean2','Relimp099T','Relimp099', 'Relimp05','Absimp','Wavetar',
 % save OpenFAST wind files
 % dlmwrite(fname1,P,'delimiter','\t','precision',7);
  dlmwrite(fname2,W,'delimiter',' ','precision',7); % time series
+ fid1 = fopen(fname2, 'w');
+            fprintf(fid1, '%g\t%10.8f\t%g\t%10.8f\t%g\t%10.8f\t%g\t%10.8f\n', W');
+            fclose(fid1);
  a = zeros(1,size(CRRWMean2,1));
 Shear = linspace(0, 0,length(a)); 
 % Shear = linspace(0.11, 0.11,length(a)); % power law exponent
 CRRWW = cat(1,CRRWMean2(:,1)',CRRWMean2(:,2)',a,a,a,Shear,a,a);
 CRRWW = CRRWW';
-  dlmwrite(fname4,CRRWW,'delimiter',' ','precision',7); % time series
-%   dlmwrite(fname4,CRRWMean2,'delimiter',',','precision',7);
+  % dlmwrite(fname4,CRRWW,'delimiter',' ','precision',7); % time series
+                fid1 = fopen(fname4, 'w');
+              fprintf(fid1, '%g\t%10.8f\t%g\t%10.8f\t%g\t%10.8f\t%g\t%10.8f\n', CRRWW');
+            fclose(fid1);
 else
 end
-P = [] 
+P = []; 
 end
 
  end
@@ -790,22 +781,18 @@ M = Wavetar;
  if Relimp099>RIC
      M = MWF;
  end
- if abs(Relimp099)<RIC || Relimp099>RIC 
 
 %% 3. calculate wave profile
 fr = M1Wave/M0Wave;
 fn = fWave;
 fc = diff(fn);
 % Spectral amplitude of sea Spectrum
-for i = 1:length(SWave)
-aa(i) = sqrt((SWave(i)*fc(1)));   % according to NREL  application of MLER paper
-end
+aa = sqrt((SWave*fc(1)));   % according to NREL  application of MLER paper
+
 phi = sqrt(SrWave./SWave);
 phi(isnan(phi))=0;
 
-for i = 1:length(SrWave)
-A(i) = ((phi(i)*aa(i))/((M0Wave*M2Wave)-(M1Wave^2)))*((M2Wave-(M1Wave*fn(i)))+(fr*((M0Wave*fn(i))-M1Wave)));
-end
+A = ((phi.*aa)./((M0Wave*M2Wave)-(M1Wave^2))).*((M2Wave-(M1Wave.*fn'))+(fr*((M0Wave.*fn')-M1Wave)));
 
 %% wave profile, at position x
 
@@ -827,44 +814,42 @@ end
 K(isnan(K))=K(2);
 
 
-
-% phe = PhaseS
-phe = phaseofinterestWave; % was *-1 when wrong!
-figure
-hold on
-ZZZ = []
-Z = []
-% if the surge offset is 5m then XX = -5 produces the MLER at X = 5m. 
+phe = phaseofinterestWave; 
+ZZZ = [];
+Z = [];
 jj = abs(min(ttMLER))*2; % MLER peaks at half this value
- for j = ddt:ddt:jj
-for i = 1:length(SrWave)
-% Z(i) = sum(aa(i)*M*A(i)*(cos((fn(i)*(j-(jj/2)))+(phe(i))))); 
-Z(i) = sum(aa(i)*M*A(i)*(cos((K(i)*-XX) +(fn(i)*(j-(jj/2)))+(phe(i))))); 
-end
+ZZZ = zeros(1, length(ddt:ddt:jj));
+jjj =  ddt:ddt:jj;
+ for j = 1:length(jjj)
+Z = (aa.*M.*A.*(cos((fn'.*(jjj(j)-(jj/2)))+(phe)))); 
 Z = Z(~isnan(Z));
- ZZZ = cat(1,ZZZ,sum(Z));
+ ZZZ(j) = sum(Z);
  end
  j = ddt:ddt:jj;
 [v ind] = min(abs(j-(abs(min(ttMLER))+max(ttMLER)))); % j - total length of run
-plot((j(1:ind)-jj./2),ZZZ(1:ind))
-j = j(1:ind);
-ZZZ = ZZZ(1:ind);
+if plots ==1
+    figure
 hold on
-%  plot((j(1:ind)-jj./2),ZZZ(1:ind),'b','linewidth',1.5)
-
+plot((j(1:ind)-jj./2),ZZZ(1:ind))
+hold on
 grid on
 xlabel('Time (s)')
 ylabel('Surface elevation  (m)')
+end
+j = j(1:ind);
+ZZZ = ZZZ(1:ind);
+
 
 % save in matlab format
 P = [];
-P = cat(1,(j-j(1)),ZZZ');
+P = cat(1,(j-j(1)),ZZZ);
 P = P';
 P = P(1:end-1,:);  %needs to be an odd number if importing as spectrum to
 PMLERWave = P;
 % wecsim.
+if plots ==1
 plot(P(:,1)-1,P(:,2))
-
+end
  if abs(Relimp099)<RIC % split target percentiles between wave and wind.
  fname = strcat(sprintf(fnamMLER),'Split.mat'); % matlab (Time Series)
  fname1 = strcat(sprintf(fnamMLER),'Split.csv'); % wavepaddles (Time Series)
@@ -878,7 +863,10 @@ plot(P(:,1)-1,P(:,2))
   % save 
   if saveq == 1
    save(fname,'P','Relimp099T','Relimp099', 'Relimp05','Absimp','Wavetar','Windtar','Total','XX') 
-dlmwrite(fname2,P,'delimiter','\t','precision',7); % time series
+% dlmwrite(fname2,P,'delimiter','\t','precision',7); % time series
+fid1 = fopen(fname2, 'w');
+            fprintf(fid1, '%g\t%10.8f\n',P);
+            fclose(fid1);
   else
   end
 %%%%%%%%%%%%%%%%%%%%%%%%%
@@ -887,95 +875,45 @@ dlmwrite(fname2,P,'delimiter','\t','precision',7); % time series
 phe = phaseofinterestWave;
 phi = RAOsampledWave;
 
-SAA = []
-SAAF = []
-SAAB= []
+SAA = [];
+SAAF = [];
+SAAB= [];
 
-for ii = 1:length(M)
 %surface elevation
-for i = 1:length(SWave)
-aaa(i) = sqrt((SWave(i)*fc(1)));   
-end
+aaa = sqrt((SWave*fc(1)));   
+
 %response
-for i = 1:length(SrWave)
-aa(i) = sqrt((SrWave(i)*fc(1)));  %not sure why the 2 is left out? same for MLER paper. 
-end
+aa = sqrt((SrWave*fc(1)));  %not sure why the 2 is left out? same for MLER paper. 
 
 % var = (aa.^2); 
 sig = 1;  % Dietz pg 49 (pg 46 for single MLER)
 mu = 0;
-for j = 1:CRRWnumSave
-for i = 1:length(aa)
-Vn(i,j) = (normrnd(mu,sig));
-Wn(i,j) = (normrnd(mu,sig));
-end
-end
+        Vn = normrnd(mu, sig, length(aa), CRRWnumSave);
+        Wn = normrnd(mu, sig, length(aa), CRRWnumSave);
+
 % 
-S1 = []
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-SE(i) = aa(i)*((Vn(i,j)*cos(phe(i)))+(Wn(i,j)*sin(phe(i))));
-end
-S1(j) = sum(SE,2);
-SE =[];
-end
-
-S2 = []
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-SE(i) = aa(i)*fn(i)*((Vn(i,j)*sin(phe(i)))-(Wn(i,j)*cos(phe(i))));
-end
-S2(j) = sum(SE,2);
-SE =[];
-end
-
-S3 = []
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-SE(i) = aa(i)*((-Vn(i,j)*sin(phe(i)))+(Wn(i,j)*cos(phe(i))));
-end
-S3(j) = sum(SE,2);
-SE =[];
-end
-
-S4 = []
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-SE(i) = aa(i)*fn(i)*((Vn(i,j)*cos(phe(i)))+(Wn(i,j)*sin(phe(i))));
-end
-S4(j) = sum(SE,2);
-SE =[];
-end
+        S1 = sum( aa.*((Vn.*cos(phe))+(Wn.*sin(phe))), 1 );
+S2 = sum(aa.*fn'.*((Vn.*sin(phe))-(Wn.*cos(phe))));
+S3 = sum(aa.*((-Vn.*sin(phe))+(Wn.*cos(phe))));
+S4 = sum(aa.*fn'.*((Vn.*cos(phe))+(Wn.*sin(phe))),1);
 
 %% Condition V and W
 fm = M1Wave/M0Wave;
-for j = 1:size(Vn,2)
-for i = 1:length(aa)
-V(i,j) = Vn(i,j)-((aa(i)/((M2Wave*M0Wave)-M1Wave^2))*(((M2Wave-(fn(i)*M1Wave))*S1(j)*cos(phe(i)))-(M(ii)*(M2Wave-(fn(i)*M1Wave))*cos(phe(i)))+(((fn(i)*M0Wave)-M1Wave)*S2(j)*sin(phe(i)))+(((fn(i)*M1Wave)-M2Wave)*S3(j)*sin(phe(i)))+(((fn(i)*M0Wave)-M1Wave)*S4(j)*cos(phe(i)))-(((M(ii)*fm*((fn(i)*M0Wave)-M1Wave)*cos(phe(i)))))));
-W(i,j) = Wn(i,j)-((aa(i)/((M2Wave*M0Wave)-M1Wave^2))*(((M2Wave-(fn(i)*M1Wave))*S1(j)*sin(phe(i)))-(M(ii)*(M2Wave-(fn(i)*M1Wave))*sin(phe(i)))-(((fn(i)*M0Wave)-M1Wave)*S2(j)*cos(phe(i)))-(((fn(i)*M1Wave)-M2Wave)*S3(j)*cos(phe(i)))+(((fn(i)*M0Wave)-M1Wave)*S4(j)*sin(phe(i)))-(((M(ii)*fm*((fn(i)*M0Wave)-M1Wave)*sin(phe(i)))))));
-end 
-end
 
-SE =[];
-SEE = [];
-for j = 1:CRRWnumSave
-for t = 1:length(ttMLER)
-for i = 1:length(aa)
-SE(i) = aaa(i)*((V(i,j)*cos(((-K(i)*-XX)-fn(i)*ttMLER(t))))+(W(i,j)*sin(((-K(i)*-XX)-fn(i)*ttMLER(t)))));
-end
-SEE(t) = sum(SE,2);
-SE =[];
-end
-SEA(j,:) = SEE;
-end
-SAA = cat(1,SAA,SEA);
-SEA = [];
-end
+             V = Vn - ((aa/((M2Wave*M0Wave)-M1Wave^2)).*(((M2Wave-(fn'*M1Wave)).*S1.*cos(phe))-(M * (M2Wave-(fn'*M1Wave)).*cos(phe))+(((fn'*M0Wave)-M1Wave).*S2.*sin(phe))+(((fn'*M1Wave)-M2Wave).*S3.*sin(phe))+(((fn'*M0Wave)-M1Wave).*S4.*cos(phe))-(((M * fm*((fn'*M0Wave)-M1Wave).*cos(phe))))));
+        W = Wn - ((aa/((M2Wave*M0Wave)-M1Wave^2)).*(((M2Wave-(fn'*M1Wave)).*S1.*sin(phe))-(M * (M2Wave-(fn'*M1Wave)).*sin(phe))-(((fn'*M0Wave)-M1Wave).*S2.*cos(phe))-(((fn'*M1Wave)-M2Wave).*S3.*cos(phe))+(((fn'*M0Wave)-M1Wave).*S4.*sin(phe))-(((M * fm*((fn'*M0Wave)-M1Wave).*sin(phe))))));
 
-ttMLER = 0:ddt:(ttMLER(end)-(ttMLER(1)))  
-repmat(ttMLER,size(SAA,1),1);
-SSE = cat(3,ans,SAA);
+SE = [];
+SEA = zeros(CRRWnumSave, length(ttMLER));  
+        for t = 1:length(ttMLER)
+            SE = aaa.*((V.*cos((-fn'.*ttMLER(t))))+(W.*sin((-fn'.*ttMLER(t)))));
+            SEA(:,t) = sum(SE,1);
+        end
+ttMLER = 0:ddt:(ttMLER(end)-(ttMLER(1)));  
+repmat(ttMLER,size(SEA,1),1);
+SSE = cat(3,ans,SEA);
 
+if plots ==1
 figure
 for i = 1:CRRWnumSave
     hold on
@@ -985,10 +923,11 @@ plot(SSE(1,:,1),mean(SSE(:,:,2)),'k','linewidth',1.5)
 grid on 
 plot(PMLERWave(:,1),PMLERWave(:,2),'r','linewidth',1.5)
 xlim([300 450])
+end
 
 % save
 for i = 1:CRRWnumSave
-fname = []
+fname = [];
    P = SSE(i,:,:);
    P = squeeze(P);
     if abs(Relimp099)<RIC % split target percentiles between wave and wind.
@@ -1001,22 +940,24 @@ fname = []
    fname2 = strcat(sprintf(fnamCMLER),sprintf('_%d',i),'.Elev'); % OpenFAST (Time Series)
     end
    if saveq == 1
-   save(fname,'P','Relimp099T','Relimp099', 'Relimp05','Absimp','Wavetar','Windtar','Total','XX') 
+   save(fname,'P','Relimp099T','Relimp099', 'Relimp05','Absimp','Wavetar','Windtar','Total','XX') ;
 % save in paddle software format
-dlmwrite(fname2,P,'delimiter','\t','precision',7);
+% dlmwrite(fname2,P,'delimiter','\t','precision',7);
+fid1 = fopen(fname2, 'w');
+            fprintf(fid1, '%g\t%10.8f\n', P);
+            fclose(fid1);
   else
   end
-P = [] 
+P = []; 
 
 end
 
- end
-
+if plots ==1 && saveq == 1
  figure(1)
  legend('Wave','Wind','Combnew','Comb check')
  % save figure of target EVDs 
- if saveq == 1
-    H = figure(1)
-savefig(H,strcat(fnamEVD,'.fig'))
- end
+    H = figure(1);
+savefig(H,strcat(fnamEVD,'.fig'));
+end
 
+Extime = toc
