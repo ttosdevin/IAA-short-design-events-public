@@ -516,6 +516,7 @@ end
 end
 if plots ==1
  plot(LFXaxis,CDF.^(nWF_old+nLF_old),'--k')
+ legend('Wave','Wind','True combined','Combined 1st estimate')
 end
  %% calculate the combined response target amplitude Total
 [val,ind] = ((min(abs((tarGcomb-percentile)))));
